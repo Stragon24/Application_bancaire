@@ -1,13 +1,20 @@
+from PySide6.QtGui import QAction
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
+    QHBoxLayout,
     QVBoxLayout,
+    QListWidget,
+    QStackedWidget,
     QPushButton,
     QFileDialog,
-    QMessageBox
+    QMessageBox,
+    QToolBar
 )
 
-from ui.transactions_view import TransactionsView
+from ui.pages.dashboard_page import DashboardPage
+from ui.pages.transactions_page import TransactionsPage
 
 from services.csv_importer import import_csv
 from services.database_service import (
@@ -27,71 +34,84 @@ from services.file_service import compute_file_hash
 
 from database.database import SessionLocal
 
-from ui.dashboard_widget import DashboardWidget
-
-from services.database_service import (
-    get_dashboard_stats
-)
-
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Gestion Financière")
-        self.resize(1400, 800)
+        self.resize(1400, 900)
+
+        # =====================
+        # TOOLBAR
+        # =====================
+
+        toolbar = QToolBar("Principal")
+
+        toolbar.setMovable(False)
+
+        self.addToolBar(toolbar)
+
+        import_action = QAction("📂 Importer CSV", self)
+
+        import_action.triggered.connect(self.import_csv_file)
+
+        toolbar.addAction(import_action)
+
+        export_action = QAction("📤 Exporter", self)
+
+        export_action.triggered.connect(self.export_csv)
+
+        toolbar.addAction(export_action)
+
+        # =====================
+        # PAGES
+        # =====================
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        layout = QVBoxLayout()
+        layout = QHBoxLayout()
 
-        self.dashboard = DashboardWidget()
-        
-        layout.addWidget(
-            self.dashboard
-        )
+        self.menu = QListWidget()
+        self.menu.addItem("📊 Tableau de bord")
+        self.menu.addItem("📋 Transactions")
+        self.menu.setMaximumWidth(250)
 
-        self.refresh_dashboard()
+        self.stack = QStackedWidget()
 
-        self.import_csv_button = QPushButton(
-            "Importer un relevé CSV"
-        )
+        self.dashboard_page = DashboardPage()
+        self.transactions_page = TransactionsPage()
 
-        self.import_csv_button.clicked.connect(
-            self.import_csv_file
-        )
+        self.stack.addWidget(self.dashboard_page)
 
-        layout.addWidget(
-            self.import_csv_button
-        )
+        self.stack.addWidget(self.transactions_page)
 
-        self.transactions_view = TransactionsView()
+        self.menu.currentRowChanged.connect(self.stack.setCurrentIndex)
 
-        layout.addWidget(
-            self.transactions_view
-        )
+        self.menu.setCurrentRow(0)
 
-        self.load_saved_transactions()
-
+        layout.addWidget(self.menu)
+        layout.addWidget(self.stack)
         central_widget.setLayout(layout)
 
-    def refresh_dashboard(self):
+        self.menu.setStyleSheet("""
+        QListWidget {
+            font-size: 14px;
+            padding: 10px;
+        }
 
-        stats = get_dashboard_stats()
+        QListWidget::item {
+            height: 40px;
+        }
 
-        self.dashboard.update_stats(
-            stats
-        )
-
-    def load_saved_transactions(self):
-
-        transactions = get_all_transactions()
-
-        self.transactions_view.load_transactions(
-            transactions
-        )
-
+        QListWidget::item:selected {
+            background-color: #2d7ff9;
+            color: white;
+            border-radius: 6px;
+        }
+        """)
+        
     def import_csv_file(self):
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -141,19 +161,18 @@ class MainWindow(QMainWindow):
             )
 
             session.close()
-
-            self.transactions_view.load_transactions(
-                transactions
-            )
             
             QMessageBox.information(
                 self,
                 "Import terminé",
                 f"{imported} transactions importées."
             )
-
-            self.refresh_dashboard()
             
+            self.dashboard_page.load_years()
+            self.dashboard_page.refresh()
+            self.transactions_page.load_years()
+            self.transactions_page.refresh()
+
         except Exception as e:
 
             QMessageBox.critical(
@@ -162,4 +181,5 @@ class MainWindow(QMainWindow):
                 str(e)
             )
     
-    
+    def export_csv(self):
+        pass
