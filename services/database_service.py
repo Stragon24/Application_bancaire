@@ -1,12 +1,202 @@
+from calendar import monthrange
 from database.database import SessionLocal
 from database.models import (
     Transaction,
     ImportedFile
 )
 from sqlalchemy import func
-from datetime import date
+from sqlalchemy import extract
+
+from database.database import SessionLocal
 
 import os
+
+INTERNAL_TRANSFER_CATEGORY = (
+    "Virements émis de comptes à comptes"
+)
+
+def get_transactions_by_period(year, month):
+
+    session = SessionLocal()
+
+    transactions = (
+        session.query(Transaction)
+        .filter(
+            extract("year", Transaction.date) == year,
+            extract("month", Transaction.date) == month
+        )
+        .order_by(Transaction.date.desc())
+        .all()
+    )
+
+    session.close()
+
+    return transactions
+
+def get_available_years():
+
+    session = SessionLocal()
+
+    years = (
+        session.query(
+            extract("year", Transaction.date)
+        )
+        .distinct()
+        .all()
+    )
+
+    session.close()
+
+    return sorted(
+        [
+            int(y[0])
+            for y in years
+        ],
+        reverse=True
+    )
+
+def get_dashboard_month_stats(
+    year,
+    month,
+    exclude_internal=False
+):
+
+    session = SessionLocal()
+
+    revenues_query = (
+        session.query(
+            func.sum(Transaction.amount)
+        )
+        .filter(
+            Transaction.amount > 0,
+            extract("year", Transaction.date) == year,
+            extract("month", Transaction.date) == month
+        )
+    )
+
+    expenses_query = (
+        session.query(
+            func.sum(Transaction.amount)
+        )
+        .filter(
+            Transaction.amount < 0,
+            extract("year", Transaction.date) == year,
+            extract("month", Transaction.date) == month
+        )
+    )
+
+    if exclude_internal:
+
+        revenues_query = revenues_query.filter(
+            Transaction.category
+            != INTERNAL_TRANSFER_CATEGORY
+        )
+
+        expenses_query = expenses_query.filter(
+            Transaction.category
+            != INTERNAL_TRANSFER_CATEGORY
+        )
+
+    revenues = (
+        revenues_query.scalar()
+        or 0
+    )
+
+    expenses = (
+        expenses_query.scalar()
+        or 0
+    )
+
+    session.close()
+
+    expenses = abs(expenses)
+
+    return {
+        "revenues": revenues,
+        "expenses": expenses,
+        "balance": revenues - expenses
+    }
+
+def get_category_expenses_month(year, month, exclude_internal=False):
+
+    session = SessionLocal()
+
+    query = (
+        session.query(
+            Transaction.category,
+            func.sum(Transaction.amount)
+        )
+        .filter(
+            Transaction.amount < 0,
+            extract("year", Transaction.date) == year,
+            extract("month", Transaction.date) == month
+        )
+    )
+
+    if exclude_internal:
+
+        query = query.filter(
+            Transaction.category !=
+            INTERNAL_TRANSFER_CATEGORY
+        )
+
+    rows = (
+        query
+        .group_by(Transaction.category)
+        .all()
+    )
+
+    session.close()
+
+    return [
+        (cat, abs(amount))
+        for cat, amount in rows
+    ]
+
+def get_monthly_expenses_year(
+    year,
+    exclude_internal=False
+):
+
+    session = SessionLocal()
+
+    data = []
+
+    for month in range(1, 13):
+
+        query = (
+            session.query(
+                func.sum(Transaction.amount)
+            )
+            .filter(
+                Transaction.amount < 0,
+                extract("year", Transaction.date) == year,
+                extract("month", Transaction.date) == month
+            )
+        )
+
+        if exclude_internal:
+
+            query = query.filter(
+                Transaction.category
+                != INTERNAL_TRANSFER_CATEGORY
+            )
+
+        amount = (
+            query.scalar()
+            or 0
+        )
+
+        data.append(
+            (
+                month,
+                abs(amount)
+            )
+        )
+
+    session.close()
+
+    return data
 
 def get_all_transactions():
 
@@ -59,13 +249,13 @@ def save_transactions(transactions):
         )
 
         session.add(transaction)
+
         imported += 1
 
     session.commit()
     session.close()
 
     return imported
-
 
 def is_file_already_imported(
     session,
@@ -80,6 +270,8 @@ def is_file_already_imported(
         .first()
         is not None
     )
+
+import os
 
 
 def register_imported_file(
@@ -98,75 +290,3 @@ def register_imported_file(
     session.add(imported_file)
 
     session.commit()
-
-def get_dashboard_stats():
-
-    session = SessionLocal()
-
-    today = date.today()
-
-    current_month = today.month
-    current_year = today.year
-
-    transactions = session.query(Transaction).all()
-
-    total_transactions = len(transactions)
-
-    revenues = (
-        session.query(
-            func.sum(Transaction.amount)
-        )
-        .filter(
-            Transaction.amount > 0
-        )
-        .scalar()
-        or 0
-    )
-
-    expenses = (
-        session.query(
-            func.sum(Transaction.amount)
-        )
-        .filter(
-            Transaction.amount < 0
-        )
-        .scalar()
-        or 0
-    )
-
-    monthly_revenues = (
-        session.query(
-            func.sum(Transaction.amount)
-        )
-        .filter(
-            Transaction.amount > 0,
-            func.strftime('%Y', Transaction.date) == str(current_year),
-            func.strftime('%m', Transaction.date) == f"{current_month:02d}"
-        )
-        .scalar()
-        or 0
-    )
-
-    monthly_expenses = (
-        session.query(
-            func.sum(Transaction.amount)
-        )
-        .filter(
-            Transaction.amount < 0,
-            func.strftime('%Y', Transaction.date) == str(current_year),
-            func.strftime('%m', Transaction.date) == f"{current_month:02d}"
-        )
-        .scalar()
-        or 0
-    )
-
-    session.close()
-
-    return {
-        "total_transactions": total_transactions,
-        "revenues": revenues,
-        "expenses": abs(expenses),
-        "monthly_revenues": monthly_revenues,
-        "monthly_expenses": abs(monthly_expenses),
-        "balance": revenues + expenses
-    }
