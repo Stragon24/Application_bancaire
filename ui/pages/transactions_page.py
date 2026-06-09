@@ -1,3 +1,6 @@
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -6,14 +9,30 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTableWidget,
     QTableWidgetItem,
-    QHeaderView
+    QLineEdit
 )
 
 from services.database_service import (
-    get_transactions_by_period,
-    get_available_years
+    get_available_years,
+    get_transactions_by_period
 )
 
+from PySide6.QtWidgets import QTableWidgetItem
+from PySide6.QtCore import Qt
+
+
+class NumericTableWidgetItem(
+    QTableWidgetItem
+):
+
+    def __lt__(self, other):
+
+        return (
+            self.data(Qt.UserRole)
+            <
+            other.data(Qt.UserRole)
+        )
+    
 
 class TransactionsPage(QWidget):
 
@@ -22,25 +41,35 @@ class TransactionsPage(QWidget):
 
         layout = QVBoxLayout()
 
-        filter_layout = QHBoxLayout()
+        # =========================
+        # FILTRES
+        # =========================
 
-        filter_layout.addWidget(
-            QLabel("Année :")
+        filters_layout = QHBoxLayout()
+
+        filters_layout.addWidget(
+            QLabel("Année")
         )
 
         self.year_combo = QComboBox()
 
-        filter_layout.addWidget(
+        self.year_combo.currentIndexChanged.connect(
+            self.refresh
+        )
+
+        filters_layout.addWidget(
             self.year_combo
         )
 
-        filter_layout.addWidget(
-            QLabel("Mois :")
+        filters_layout.addSpacing(20)
+
+        filters_layout.addWidget(
+            QLabel("Mois")
         )
 
         self.month_combo = QComboBox()
 
-        self.month_combo.addItems([
+        months = [
             "Janvier",
             "Février",
             "Mars",
@@ -53,17 +82,46 @@ class TransactionsPage(QWidget):
             "Octobre",
             "Novembre",
             "Décembre"
-        ])
+        ]
 
-        filter_layout.addWidget(
+        for i, month in enumerate(months, start=1):
+
+            self.month_combo.addItem(
+                month,
+                i
+            )
+
+        self.month_combo.currentIndexChanged.connect(
+            self.refresh
+        )
+
+        filters_layout.addWidget(
             self.month_combo
         )
 
-        filter_layout.addStretch()
+        filters_layout.addSpacing(20)
+
+        self.search_edit = QLineEdit()
+
+        self.search_edit.setPlaceholderText(
+            "Rechercher un libellé, une catégorie ou un compte..."
+        )
+
+        self.search_edit.textChanged.connect(
+            self.refresh
+        )
+
+        filters_layout.addWidget(
+            self.search_edit
+        )
 
         layout.addLayout(
-            filter_layout
+            filters_layout
         )
+
+        # =========================
+        # TABLEAU
+        # =========================
 
         self.table = QTableWidget()
 
@@ -77,8 +135,18 @@ class TransactionsPage(QWidget):
             "Montant"
         ])
 
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Stretch
+        self.table.setSortingEnabled(True)
+
+        self.table.verticalHeader().setVisible(
+            False
+        )
+
+        self.table.setAlternatingRowColors(
+            True
+        )
+
+        self.table.horizontalHeader().setStretchLastSection(
+            True
         )
 
         layout.addWidget(
@@ -89,26 +157,27 @@ class TransactionsPage(QWidget):
 
         self.load_years()
 
-        self.year_combo.currentIndexChanged.connect(
-            self.refresh
-        )
-
-        self.month_combo.currentIndexChanged.connect(
-            self.refresh
-        )
-
-        self.refresh()
-
     def load_years(self):
 
-        years = get_available_years()
+        self.year_combo.blockSignals(True)
 
         self.year_combo.clear()
 
+        years = get_available_years()
+
         for year in years:
+
             self.year_combo.addItem(
                 str(year)
             )
+
+        self.year_combo.blockSignals(False)
+
+        if self.year_combo.count():
+
+            self.year_combo.setCurrentIndex(0)
+
+        self.refresh()
 
     def refresh(self):
 
@@ -119,10 +188,7 @@ class TransactionsPage(QWidget):
             self.year_combo.currentText()
         )
 
-        month = (
-            self.month_combo.currentIndex()
-            + 1
-        )
+        month = self.month_combo.currentData()
 
         transactions = (
             get_transactions_by_period(
@@ -131,48 +197,132 @@ class TransactionsPage(QWidget):
             )
         )
 
-        self.table.setRowCount(
-            len(transactions)
+        search = (
+            self.search_edit.text()
+            .lower()
+            .strip()
         )
 
-        for row, t in enumerate(transactions):
+        rows = []
+
+        for transaction in transactions:
+
+            if search:
+
+                label = (
+                    transaction.label or ""
+                ).lower()
+
+                category = (
+                    transaction.category or ""
+                ).lower()
+
+                account = (
+                    transaction.account_label or ""
+                ).lower()
+
+                if (
+                    search not in label
+                    and search not in category
+                    and search not in account
+                ):
+                    continue
+
+            rows.append(
+                transaction
+            )
+
+        self.table.setSortingEnabled(
+            False
+        )
+
+        self.table.setRowCount(
+            len(rows)
+        )
+
+        for row, transaction in enumerate(rows):
+
+            date_item = QTableWidgetItem(
+                transaction.date.strftime(
+                    "%d/%m/%Y"
+                )
+            )
+
+            date_item.setData(
+                Qt.UserRole,
+                transaction.date
+            )
+
+            label_item = QTableWidgetItem(
+                transaction.label
+            )
+
+            category_item = QTableWidgetItem(
+                transaction.category
+            )
+
+            account_item = QTableWidgetItem(
+                transaction.account_label
+            )
+            
+            amount_item = NumericTableWidgetItem(
+                f"{transaction.amount:.2f} €"
+            )
+
+            amount_item.setData(
+                Qt.UserRole,
+                transaction.amount
+            )
+
+            if transaction.amount >= 0:
+
+                amount_item.setForeground(
+                    QColor("green")
+                )
+
+            else:
+
+                amount_item.setForeground(
+                    QColor("red")
+                )
 
             self.table.setItem(
                 row,
                 0,
-                QTableWidgetItem(
-                    str(t.date)
-                )
+                date_item
             )
 
             self.table.setItem(
                 row,
                 1,
-                QTableWidgetItem(
-                    t.label
-                )
+                label_item
             )
 
             self.table.setItem(
                 row,
                 2,
-                QTableWidgetItem(
-                    t.category
-                )
+                category_item
             )
 
             self.table.setItem(
                 row,
                 3,
-                QTableWidgetItem(
-                    t.account_label
-                )
+                account_item
             )
 
             self.table.setItem(
                 row,
                 4,
-                QTableWidgetItem(
-                    f"{t.amount:.2f}"
-                )
+                amount_item
             )
+
+        self.table.resizeColumnsToContents()
+
+        self.table.setSortingEnabled(
+            True
+        )
+
+        self.table.sortItems(
+            0,
+            Qt.DescendingOrder
+        )

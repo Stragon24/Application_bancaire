@@ -15,12 +15,16 @@ from services.database_service import (
     get_available_years,
     get_dashboard_month_stats,
     get_category_expenses_month,
-    get_monthly_expenses_year
+    get_monthly_expenses_year,
+    get_transfer_details,
+    get_monthly_savings,
+    INTERNAL_TRANSFER_CATEGORY,
+    EXTERNAL_TRANSFER_CATEGORY
 )
 
 from ui.widgets.monthly_chart import MonthlyChart
 from ui.widgets.category_pie_chart import CategoryPieChart
-
+from ui.widgets.savings_chart import SavingsChart
 
 class DashboardPage(QWidget):
 
@@ -165,6 +169,12 @@ class DashboardPage(QWidget):
 
         self.setLayout(main_layout)
 
+        self.savings_chart = SavingsChart()
+
+        main_layout.addWidget(
+            self.savings_chart
+        )
+
         self.load_years()
 
         self.year_combo.currentIndexChanged.connect(
@@ -219,10 +229,7 @@ class DashboardPage(QWidget):
             self.year_combo.currentText()
         )
 
-        month = (
-            self.month_combo.currentIndex()
-            + 1
-        )
+        month = self.month_combo.currentIndex() + 1
 
         stats = get_dashboard_month_stats(
             year,
@@ -242,24 +249,37 @@ class DashboardPage(QWidget):
             f"Dépenses\n{stats['expenses']:.2f} €"
         )
 
-        categories = (
-            get_category_expenses_month(
-                year,
-                month,
-                self.hide_internal_transfers
-            )
+        categories = get_category_expenses_month(
+            year,
+            month,
+            self.hide_internal_transfers
         )
 
         self.category_chart.update_chart(
             categories
         )
 
-        total = sum(
-            amount
-            for _, amount in categories
+        self.monthly_chart.update_chart(
+            get_monthly_expenses_year(
+                year,
+                self.hide_internal_transfers
+            )
+        )
+
+        self.savings_chart.update_chart(
+            get_monthly_savings(
+                year,
+                self.hide_internal_transfers
+            )
         )
 
         self.other_categories.clear()
+
+        total = sum(
+            amount
+            for _, amount
+            in categories
+        )
 
         self.other_categories.addItem(
             "=== Catégories affichées ==="
@@ -280,8 +300,29 @@ class DashboardPage(QWidget):
             if percent >= 5:
 
                 self.other_categories.addItem(
-                    f"{cat} : {amount:.2f} € ({percent:.1f}%)"
+                    f"{cat} : "
+                    f"{amount:.2f} € "
+                    f"({percent:.1f}%)"
                 )
+
+                if (
+                    (cat == INTERNAL_TRANSFER_CATEGORY) or (cat == EXTERNAL_TRANSFER_CATEGORY)
+                ):
+
+                    transfers = (
+                        get_transfer_details(
+                            year,
+                            month,
+                            cat
+                        )
+                    )
+
+                    for label, value in transfers:
+
+                        self.other_categories.addItem(
+                            f"    • {label}"
+                            f" : {value:.2f} €"
+                        )
 
             else:
 
@@ -296,22 +337,42 @@ class DashboardPage(QWidget):
         if small_categories:
 
             self.other_categories.addItem("")
+
             self.other_categories.addItem(
-                "=== Regroupées dans 'Autres' ==="
+                "=== Regroupées dans Autres ==="
             )
 
-            for cat, amount, percent in small_categories:
+            for cat, amount, percent in sorted(
+                small_categories,
+                key=lambda x: x[1],
+                reverse=True
+            ):
 
                 self.other_categories.addItem(
-                    f"{cat} : {amount:.2f} € ({percent:.1f}%)"
+                    f"{cat} : "
+                    f"{amount:.2f} € "
+                    f"({percent:.1f}%)"
                 )
 
-        self.monthly_chart.update_chart(
-            get_monthly_expenses_year(
-                year,
-                self.hide_internal_transfers
-            )
-        )
+                if (
+                    cat
+                    == INTERNAL_TRANSFER_CATEGORY
+                ):
+
+                    transfers = (
+                        get_transfer_details(
+                            year,
+                            month,
+                            cat
+                        )
+                    )
+
+                    for label, value in transfers:
+
+                        self.other_categories.addItem(
+                            f"    • {label}"
+                            f" : {value:.2f} €"
+                        )
 
     def toggle_internal_transfers(self):
 
