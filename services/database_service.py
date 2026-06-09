@@ -11,21 +11,141 @@ from database.database import SessionLocal
 
 import os
 
-INTERNAL_TRANSFER_CATEGORY = (
-    "Virements émis de comptes à comptes"
-)
+INTERNAL_TRANSFER_CATEGORY = ("Virements émis de comptes à comptes")
 
-def get_transactions_by_period(year, month):
+EXTERNAL_TRANSFER_CATEGORY = ("Virements émis")
+
+IGNORED_CATEGORY = ("Prélèvements cartes débit différé et cartes crédit conso")
+
+def get_transfer_details(
+    year,
+    month,
+    category
+):
+
+    session = SessionLocal()
+
+    rows = (
+        session.query(
+            Transaction.label,
+            func.sum(Transaction.amount)
+        )
+        .filter(
+            Transaction.category == category,
+            extract(
+                "year",
+                Transaction.date
+            ) == year,
+            extract(
+                "month",
+                Transaction.date
+            ) == month
+        )
+        .group_by(
+            Transaction.label
+        )
+        .all()
+    )
+
+    session.close()
+
+    return [
+        (
+            label,
+            abs(amount)
+        )
+        for label, amount in rows
+    ]
+
+def get_monthly_savings(
+    year,
+    exclude_internal=False
+):
+
+    session = SessionLocal()
+
+    result = []
+
+    for month in range(1, 13):
+
+        revenues_query = (
+            session.query(
+                func.sum(Transaction.amount)
+            )
+            .filter(
+                Transaction.amount > 0,
+                extract("year", Transaction.date) == year,
+                extract("month", Transaction.date) == month,
+                Transaction.category != IGNORED_CATEGORY
+            )
+        )
+
+        expenses_query = (
+            session.query(
+                func.sum(Transaction.amount)
+            )
+            .filter(
+                Transaction.amount < 0,
+                extract("year", Transaction.date) == year,
+                extract("month", Transaction.date) == month,
+                Transaction.category != IGNORED_CATEGORY
+            )
+        )
+
+        if exclude_internal:
+
+            revenues_query = revenues_query.filter(
+                Transaction.category != INTERNAL_TRANSFER_CATEGORY
+            )
+
+            expenses_query = expenses_query.filter(
+                Transaction.category != INTERNAL_TRANSFER_CATEGORY
+            )
+
+        revenues = (
+            revenues_query.scalar()
+            or 0
+        )
+
+        expenses = abs(
+            expenses_query.scalar()
+            or 0
+        )
+
+        result.append(
+            (
+                month,
+                revenues - expenses
+            )
+        )
+
+    session.close()
+
+    return result
+
+def get_transactions_by_period(
+    year,
+    month
+):
 
     session = SessionLocal()
 
     transactions = (
         session.query(Transaction)
         .filter(
-            extract("year", Transaction.date) == year,
-            extract("month", Transaction.date) == month
+            extract(
+                "year",
+                Transaction.date
+            ) == year,
+            extract(
+                "month",
+                Transaction.date
+            ) == month,
+            Transaction.category != IGNORED_CATEGORY
         )
-        .order_by(Transaction.date.desc())
+        .order_by(
+            Transaction.date.desc()
+        )
         .all()
     )
 
@@ -70,7 +190,8 @@ def get_dashboard_month_stats(
         .filter(
             Transaction.amount > 0,
             extract("year", Transaction.date) == year,
-            extract("month", Transaction.date) == month
+            extract("month", Transaction.date) == month,
+            Transaction.category != IGNORED_CATEGORY
         )
     )
 
@@ -81,7 +202,8 @@ def get_dashboard_month_stats(
         .filter(
             Transaction.amount < 0,
             extract("year", Transaction.date) == year,
-            extract("month", Transaction.date) == month
+            extract("month", Transaction.date) == month,
+            Transaction.category != IGNORED_CATEGORY
         )
     )
 
@@ -129,7 +251,8 @@ def get_category_expenses_month(year, month, exclude_internal=False):
         .filter(
             Transaction.amount < 0,
             extract("year", Transaction.date) == year,
-            extract("month", Transaction.date) == month
+            extract("month", Transaction.date) == month,
+            Transaction.category != IGNORED_CATEGORY
         )
     )
 
@@ -171,7 +294,8 @@ def get_monthly_expenses_year(
             .filter(
                 Transaction.amount < 0,
                 extract("year", Transaction.date) == year,
-                extract("month", Transaction.date) == month
+                extract("month", Transaction.date) == month,
+                Transaction.category != IGNORED_CATEGORY
             )
         )
 
