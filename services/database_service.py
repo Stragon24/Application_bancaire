@@ -2,12 +2,16 @@ from calendar import monthrange
 from database.database import SessionLocal
 from database.models import (
     Transaction,
-    ImportedFile
 )
 from sqlalchemy import func
 from sqlalchemy import extract
 
 from database.database import SessionLocal
+
+from database.models import (
+    Transaction,
+    UserExclusion
+)
 
 import os
 
@@ -17,15 +21,200 @@ EXTERNAL_TRANSFER_CATEGORY = ("Virements émis")
 
 IGNORED_CATEGORY = ("Prélèvements cartes débit différé et cartes crédit conso")
 
-def get_transfer_details(
-    year,
-    month,
-    category
-):
+def get_existing_months():
 
     session = SessionLocal()
 
     rows = (
+        session.query(
+            extract("year", Transaction.date),
+            extract("month", Transaction.date)
+        )
+        .distinct()
+        .all()
+    )
+
+    session.close()
+
+    return {
+        (
+            int(year),
+            int(month)
+        )
+        for year, month in rows
+    }
+
+def get_user_exclusions():
+
+    session = SessionLocal()
+
+    rows = (
+        session.query(
+            UserExclusion
+        )
+        .order_by(
+            UserExclusion.exclusion_type,
+            UserExclusion.value
+        )
+        .all()
+    )
+
+    session.close()
+
+    return rows
+
+def get_excluded_categories():
+
+    session = SessionLocal()
+
+    rows = (
+        session.query(
+            UserExclusion.value
+        )
+        .filter(
+            UserExclusion.exclusion_type
+            == "category"
+        )
+        .all()
+    )
+
+    session.close()
+
+    return [
+        r[0]
+        for r in rows
+    ]
+
+def get_excluded_labels():
+
+    session = SessionLocal()
+
+    rows = (
+        session.query(
+            UserExclusion.value
+        )
+        .filter(
+            UserExclusion.exclusion_type
+            == "label"
+        )
+        .all()
+    )
+
+    session.close()
+
+    return [
+        r[0]
+        for r in rows
+    ]
+
+def add_exclusion(
+    exclusion_type,
+    value
+):
+
+    session = SessionLocal()
+
+    exists = (
+        session.query(
+            UserExclusion
+        )
+        .filter(
+            UserExclusion.exclusion_type
+            == exclusion_type,
+            UserExclusion.value
+            == value
+        )
+        .first()
+    )
+
+    if not exists:
+
+        session.add(
+            UserExclusion(
+                exclusion_type=exclusion_type,
+                value=value
+            )
+        )
+
+        session.commit()
+
+    session.close()
+
+def delete_exclusion(
+    exclusion_id
+):
+
+    session = SessionLocal()
+
+    row = session.get(
+        UserExclusion,
+        exclusion_id
+    )
+
+    if row:
+
+        session.delete(row)
+
+        session.commit()
+
+    session.close()
+
+def get_all_categories():
+
+    session = SessionLocal()
+
+    rows = (
+        session.query(
+            Transaction.category
+        )
+        .distinct()
+        .order_by(
+            Transaction.category
+        )
+        .all()
+    )
+
+    session.close()
+
+    return [
+        r[0]
+        for r in rows
+        if r[0]
+    ]
+
+def get_all_labels():
+
+    session = SessionLocal()
+
+    rows = (
+        session.query(
+            Transaction.label
+        )
+        .distinct()
+        .order_by(
+            Transaction.label
+        )
+        .all()
+    )
+
+    session.close()
+
+    return [
+        r[0]
+        for r in rows
+        if r[0]
+    ]
+
+def get_transfer_details(
+    year,
+    month,
+    category,
+    apply_exclusions=False
+):
+
+    session = SessionLocal()
+
+    query = (
         session.query(
             Transaction.label,
             func.sum(Transaction.amount)
@@ -41,6 +230,22 @@ def get_transfer_details(
                 Transaction.date
             ) == month
         )
+    )
+
+    if apply_exclusions:
+
+        excluded_labels = (
+            get_excluded_labels()
+        )
+
+        query = query.filter(
+            ~Transaction.label.in_(
+                excluded_labels
+            )
+        )
+
+    rows = (
+        query
         .group_by(
             Transaction.label
         )
@@ -59,7 +264,7 @@ def get_transfer_details(
 
 def get_monthly_savings(
     year,
-    exclude_internal=False
+    apply_exclusions=False
 ):
 
     session = SessionLocal()
@@ -92,14 +297,38 @@ def get_monthly_savings(
             )
         )
 
-        if exclude_internal:
+        if apply_exclusions:
+
+            excluded_categories = (
+                get_excluded_categories()
+            )
+
+            excluded_labels = (
+                get_excluded_labels()
+            )
 
             revenues_query = revenues_query.filter(
-                Transaction.category != INTERNAL_TRANSFER_CATEGORY
+                ~Transaction.category.in_(
+                    excluded_categories
+                )
+            )
+
+            revenues_query = revenues_query.filter(
+                ~Transaction.label.in_(
+                    excluded_labels
+                )
             )
 
             expenses_query = expenses_query.filter(
-                Transaction.category != INTERNAL_TRANSFER_CATEGORY
+                ~Transaction.category.in_(
+                    excluded_categories
+                )
+            )
+
+            expenses_query = expenses_query.filter(
+                ~Transaction.label.in_(
+                    excluded_labels
+                )
             )
 
         revenues = (
@@ -178,7 +407,7 @@ def get_available_years():
 def get_dashboard_month_stats(
     year,
     month,
-    exclude_internal=False
+    apply_exclusions=False
 ):
 
     session = SessionLocal()
@@ -207,16 +436,38 @@ def get_dashboard_month_stats(
         )
     )
 
-    if exclude_internal:
+    if apply_exclusions:
+
+        excluded_categories = (
+            get_excluded_categories()
+        )
+
+        excluded_labels = (
+            get_excluded_labels()
+        )
 
         revenues_query = revenues_query.filter(
-            Transaction.category
-            != INTERNAL_TRANSFER_CATEGORY
+            ~Transaction.category.in_(
+                excluded_categories
+            )
+        )
+
+        revenues_query = revenues_query.filter(
+            ~Transaction.label.in_(
+                excluded_labels
+            )
         )
 
         expenses_query = expenses_query.filter(
-            Transaction.category
-            != INTERNAL_TRANSFER_CATEGORY
+            ~Transaction.category.in_(
+                excluded_categories
+            )
+        )
+
+        expenses_query = expenses_query.filter(
+            ~Transaction.label.in_(
+                excluded_labels
+            )
         )
 
     revenues = (
@@ -239,7 +490,7 @@ def get_dashboard_month_stats(
         "balance": revenues - expenses
     }
 
-def get_category_expenses_month(year, month, exclude_internal=False):
+def get_category_expenses_month(year, month, apply_exclusions=False):
 
     session = SessionLocal()
 
@@ -256,11 +507,26 @@ def get_category_expenses_month(year, month, exclude_internal=False):
         )
     )
 
-    if exclude_internal:
+    if apply_exclusions:
+
+        excluded_categories = (
+            get_excluded_categories()
+        )
+
+        excluded_labels = (
+            get_excluded_labels()
+        )
 
         query = query.filter(
-            Transaction.category !=
-            INTERNAL_TRANSFER_CATEGORY
+            ~Transaction.category.in_(
+                excluded_categories
+            )
+        )
+
+        query = query.filter(
+            ~Transaction.label.in_(
+                excluded_labels
+            )
         )
 
     rows = (
@@ -278,7 +544,7 @@ def get_category_expenses_month(year, month, exclude_internal=False):
 
 def get_monthly_expenses_year(
     year,
-    exclude_internal=False
+    apply_exclusions=False
 ):
 
     session = SessionLocal()
@@ -299,11 +565,26 @@ def get_monthly_expenses_year(
             )
         )
 
-        if exclude_internal:
+        if apply_exclusions:
+
+            excluded_categories = (
+                get_excluded_categories()
+            )
+
+            excluded_labels = (
+                get_excluded_labels()
+            )
 
             query = query.filter(
-                Transaction.category
-                != INTERNAL_TRANSFER_CATEGORY
+                ~Transaction.category.in_(
+                    excluded_categories
+                )
+            )
+
+            query = query.filter(
+                ~Transaction.label.in_(
+                    excluded_labels
+                )
             )
 
         amount = (
@@ -356,9 +637,26 @@ def save_transactions(transactions):
 
     session = SessionLocal()
 
+    existing_months = get_existing_months()
+
+    ignored_months = set()
+
     imported = 0
 
     for t in transactions:
+
+        transaction_month = (
+            t["date"].year,
+            t["date"].month
+        )
+
+        if transaction_month in existing_months:
+
+            ignored_months.add(
+                transaction_month
+            )
+
+            continue
 
         transaction = Transaction(
             date=t["date"],
@@ -379,38 +677,7 @@ def save_transactions(transactions):
     session.commit()
     session.close()
 
-    return imported
-
-def is_file_already_imported(
-    session,
-    file_hash
-):
-
     return (
-        session.query(ImportedFile)
-        .filter(
-            ImportedFile.file_hash == file_hash
-        )
-        .first()
-        is not None
+        imported,
+        ignored_months
     )
-
-import os
-
-
-def register_imported_file(
-    session,
-    file_path,
-    file_hash
-):
-
-    imported_file = ImportedFile(
-        filename=os.path.basename(
-            file_path
-        ),
-        file_hash=file_hash
-    )
-
-    session.add(imported_file)
-
-    session.commit()
