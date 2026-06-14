@@ -11,7 +11,25 @@ from datetime import datetime
 
 from database.database import Base
 
+class UserExclusion(Base):
 
+    __tablename__ = "user_exclusions"
+
+    id = Column(
+        Integer,
+        primary_key=True
+    )
+
+    exclusion_type = Column(
+        String(50)
+    )
+    # category
+    # label
+
+    value = Column(
+        String(500)
+    )
+    
 class Transaction(Base):
 
     __tablename__ = "transactions"
@@ -35,19 +53,3 @@ class Transaction(Base):
     account_num = Column(String(255))
 
     account_label = Column(String(255))
-
-
-class ImportedFile(Base):
-
-    __tablename__ = "imported_files"
-
-    id = Column(Integer, primary_key=True)
-
-    filename = Column(String(500))
-
-    file_hash = Column(String(64), unique=True)
-
-    imported_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )

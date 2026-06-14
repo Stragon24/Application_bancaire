@@ -25,6 +25,9 @@ from services.database_service import (
 from ui.widgets.monthly_chart import MonthlyChart
 from ui.widgets.category_pie_chart import CategoryPieChart
 from ui.widgets.savings_chart import SavingsChart
+from ui.dialogs.exclusions_dialog import (
+    ExclusionsDialog
+)
 
 class DashboardPage(QWidget):
 
@@ -34,20 +37,39 @@ class DashboardPage(QWidget):
 
         main_layout = QVBoxLayout()
 
+        buttons_layout = QHBoxLayout()
+
         self.hide_internal_transfers = False
 
         self.transfer_button = QPushButton(
-            "Enlever les virements internes"
+            "Masquer les éléments exclus"
         )
 
         self.transfer_button.clicked.connect(
             self.toggle_internal_transfers
         )
 
-        main_layout.insertWidget(
-            0,
+        buttons_layout.addWidget(
             self.transfer_button
         )
+
+        self.config_button = QPushButton(
+             "⚙️ Configurer les exclusions"
+        )
+
+        self.config_button.clicked.connect(
+            self.open_exclusions
+        )
+
+        buttons_layout.addWidget(
+            self.config_button
+        )
+
+
+        main_layout.addLayout(
+            buttons_layout
+        )
+
 
         # =====================
         # FILTRES
@@ -193,6 +215,14 @@ class DashboardPage(QWidget):
 
         self.refresh()
 
+    def open_exclusions(self):
+
+        dialog = ExclusionsDialog()
+
+        dialog.exec()
+
+        self.refresh()
+
     def create_card(self):
 
         label = QLabel()
@@ -313,7 +343,8 @@ class DashboardPage(QWidget):
                         get_transfer_details(
                             year,
                             month,
-                            cat
+                            cat,
+                            self.hide_internal_transfers
                         )
                     )
 
@@ -354,16 +385,15 @@ class DashboardPage(QWidget):
                     f"({percent:.1f}%)"
                 )
 
-                if (
-                    cat
-                    == INTERNAL_TRANSFER_CATEGORY
+                if ((cat == INTERNAL_TRANSFER_CATEGORY) or (cat == EXTERNAL_TRANSFER_CATEGORY)
                 ):
 
                     transfers = (
                         get_transfer_details(
                             year,
                             month,
-                            cat
+                            cat,
+                            self.hide_internal_transfers
                         )
                     )
 
@@ -383,13 +413,13 @@ class DashboardPage(QWidget):
         if self.hide_internal_transfers:
 
             self.transfer_button.setText(
-                "Rajouter les virements internes"
+                "Afficher les éléments exclus"
             )
 
         else:
 
             self.transfer_button.setText(
-                "Enlever les virements internes"
+                "Masquer les éléments exclus"
             )
 
         self.refresh()
