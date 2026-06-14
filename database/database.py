@@ -24,7 +24,13 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # Dossier racine du projet
-BASE_DIR = Path(__file__).resolve().parent.parent
+from pathlib import Path
+import sys
+
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Dossier data
 DATA_DIR = BASE_DIR / "data"
